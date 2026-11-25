@@ -1,0 +1,27 @@
+# Emerald PC's additions to tools/release_audit_allow.toml, for its release
+# ZIP (pc_port/tools/pc_build_release.py merges both). Every entry has a reason.
+# Allowed here means past the size check only: every file is still scanned
+# for the ROM's bytes, ROM headers, data packs and secrets.
+
+[large]
+paths = [
+    # The engine-only executable: the game data taken out (pc_release.py);
+    # its code and variables, as the console's 3DSX carries them.
+    "EmeraldPC-v*/emerald-pc.exe",
+    "EmeraldPC-v*/emerald-pc",
+    # The builder (pc_builder.py over Emerald 3DS's builder), frozen by
+    # PyInstaller: its Python modules in an archive, as the console's
+    # Emerald3DS-Builder.exe.
+    "EmeraldPC-v*/emerald-pc-builder.exe",
+    # The recipe, as the console's (see the base allowlist).
+    "EmeraldPC-v*/payload/emerald3ds.recipe",
+    # The battle screen's backdrop: the port's own art (an engine file,
+    # tools/port_common/staging.py), as in the console's RomFS.
+    "EmeraldPC-v*/engine/bottom/battle.bin",
+]
+
+[runtime]
+# Third-party runtime libraries shipped unmodified under their own licences
+# (SDL3: zlib; MinGW's libgcc and winpthreads), and the builder's PyInstaller
+# runtime (Python, Pillow).
+globs = ["EmeraldPC-v*/*.dll", "EmeraldPC-v*/_internal/*"]

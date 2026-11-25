@@ -1,0 +1,51 @@
+# J4 check: new_game.txt's start (intro -> Mom's house), then each button of
+# the bottom screen's dock tapped with the stylus, back to MAP in between.
+# Dock (bottom screen, 320x240): eight 40-pixel buttons along y = 220,
+# MAP POKEDEX POKEMON BAG POKENAV CARD SAVE OPTION, centres at x = 20 + 40 i.
+wait 300
+press START
+wait 240
+press START
+wait 180
+mash A 4500 24
+mash B 360 24
+hold RIGHT 120
+mash B 240 24
+hold RIGHT 120
+mash A 720 24
+mash B 240 24
+hold DOWN 48
+hold LEFT 96
+hold UP 32
+hold RIGHT 160
+wait 120
+mash B 900 24          # Mom's lines, if any
+# (frame ~8 400) each section, then MAP
+touch 142 220 6        # BAG
+wait 240
+touch 20 220 6         # MAP
+wait 120
+touch 102 220 6        # POKEMON
+wait 240
+touch 20 220 6
+wait 120
+touch 182 220 6        # POKENAV
+wait 240
+touch 20 220 6
+wait 120
+touch 222 220 6        # CARD (trainer card)
+wait 240
+touch 20 220 6
+wait 120
+touch 302 220 6        # OPTION
+wait 240
+touch 20 220 6
+wait 120
+touch 262 220 6        # SAVE
+wait 240
+touch 20 220 6
+wait 120
+touch 142 220 6        # BAG again, the game surely free by now
+wait 240
+touch 20 220 6
+wait 120

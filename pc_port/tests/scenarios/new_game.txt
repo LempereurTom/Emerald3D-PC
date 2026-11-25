@@ -1,0 +1,20 @@
+# J2 check: intro skipped, title screen, new game, Birch's speech (the A
+# presses type the name "AAAAAAA"), into the truck and out into Littleroot
+# Town, walking around in 2D. Tuned by looking at the dumps.
+wait 300
+press START            # skip the intro
+wait 240
+press START            # title screen
+wait 180
+mash A 4500 24         # NEW GAME, Birch's speech, gender, name, truck ride
+mash B 360 24          # close any text (A would read the boxes again)
+hold RIGHT 120         # out of the truck when its door is open
+mash B 240 24
+hold RIGHT 120
+mash A 720 24          # Mom outside
+mash B 240 24
+hold DOWN 48
+hold LEFT 96
+hold UP 32
+hold RIGHT 160
+wait 120

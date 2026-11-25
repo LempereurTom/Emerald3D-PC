@@ -1,0 +1,26 @@
+# A save in Mom's house, the player free: new_game.txt's start, then SAVE -> YES.
+wait 300
+press START
+wait 240
+press START
+wait 180
+mash A 4500 24
+mash B 360 24
+hold RIGHT 120
+mash B 240 24
+hold RIGHT 120
+mash A 720 24
+mash B 240 24
+hold DOWN 48
+hold LEFT 96
+hold UP 32
+hold RIGHT 160
+wait 120
+mash B 900 24          # Mom's lines
+touch 262 220 6        # SAVE (dock)
+wait 120
+touch 216 186 6        # YES
+wait 600               # written
+mash B 120 24
+touch 20 220 6         # MAP
+wait 120
