@@ -32,6 +32,11 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      # The patches and the decompilation must keep their LF endings (a
+      # Windows checkout converts them by default, and git apply then fails).
+      - name: No line-ending conversion
+        shell: pwsh
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
