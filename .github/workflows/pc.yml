@@ -56,7 +56,8 @@ jobs:
         run: |
           git config --global core.autocrlf false
           PATH=$PATH:/ucrt64/bin python tools/bootstrap.py --dir build/upstream-pc
-          PATH=$PATH:/ucrt64/bin make -C build/upstream-pc tools generated -j4
+          # The decomp's host tools with the UCRT64 compiler (libpng is there), as locally.
+          PATH=/ucrt64/bin:$PATH make -C build/upstream-pc tools generated -j4
       - name: Build (development, never uploaded)
         run: make -C build/upstream-pc/3ds_port -f $PWD/pc_port/pc.mk pc -j4
       - name: Save layouts match the console's
