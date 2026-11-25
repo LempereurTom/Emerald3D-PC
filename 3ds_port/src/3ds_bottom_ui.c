@@ -2423,6 +2423,25 @@ static u16 ExtraShownValue(const CtrExtra *extra)
 #define FOCUS_NONE 0xFF
 enum { INSIDE_NONE, INSIDE_OPTIONS, INSIDE_SAVE };
 static u8 sFocus = FOCUS_NONE, sInside, sOptFocus;
+
+#ifdef PORT_PC
+/* The PC's FUSION layout shows this screen over the world only when it has
+ * something to show: a game screen (the bag, the party, the Pokédex...), a
+ * section other than the map, or the keyboard focus on the dock. Not a
+ * battle's commands (the keys play the battle) nor the title. */
+bool8 CtrBottom_PcWantsShown(void)
+{
+    if (sShown.mode >= MODE_PARTY_MENU && sShown.mode <= MODE_CARD)
+        return TRUE;
+    return sShown.mode == MODE_FIELD && (sScreen != SCR_MAP || sFocus != FOCUS_NONE || sInside != INSIDE_NONE);
+}
+
+/* Whether the dock is on this screen at all (the field), for FUSION's bar. */
+bool8 CtrBottom_PcDockShown(void)
+{
+    return sShown.mode == MODE_FIELD;
+}
+#endif
 /* Leaving the focus, the buttons stay the bottom screen's until let go:
  * the B or A that left it must not reach the game. */
 static bool8 sSwallow;
@@ -6981,6 +7000,13 @@ static void ProcessKeys(u8 mode)
     u16 down = in->down;
     bool8 x = (in->physicalDown & CTR_KEY_X) != 0;
 
+#ifdef PORT_PC
+    /* A PC's START (a pad's Options or Menu, the keyboard's Enter) opens and
+     * closes this menu as X does, in the field: the START menu it replaces is
+     * never drawn there (unless the classic menus are on). */
+    if (!sClassicMenus && mode == MODE_FIELD && (in->physicalDown & CTR_KEY_START))
+        x = TRUE;
+#endif
     if (sSwallow && !(in->held & CTR_KEY_GAME) && !(in->physicalHeld & (CTR_KEY_X | CTR_KEY_Y)))
         sSwallow = FALSE;
     if (!ColumnShown(mode))
@@ -7796,3 +7822,405 @@ void CtrBottom_Frame(void)
     BottomProfile(frames, mode, ticks, 0);
 }
 
+
+#ifdef PORT_PC
+#include "pc_hud.h"
+
+/*
+ * FUSION's single-screen interface (pc_port/src/gl/pc_hud.c): its plates are
+ * drawn again, on their own, into a canvas of the screen's layout - once on
+ * black and once on white, so the window can tell each pixel's coverage (the
+ * plates' rings and shadows blend) and draw them clean over the world. Laid
+ * out apart there (the header as it is, RUN and the four buttons in a row
+ * below it) so no plate's ring shows in another's piece. Redrawn when what
+ * the bottom screen shows changes.
+ */
+#define HUD_RUN_X 10
+#define HUD_RUN_Y 60
+#define HUD_BUTTON_X 10
+#define HUD_BUTTON_Y 110
+#define HUD_BUTTON_STEP 56
+
+static u16 sHudCanvas[2][W * H];
+static ViewState sHudDrawn;
+static u32 sHudVersion;
+static bool8 sHudMade;
+
+static const u8 sHudSections[PC_HUD_BUTTONS] = {SCR_POKEMON, SCR_BAG, SCR_SAVE, SCR_OPTION};
+
+static PcHudBox HudBounds(int x, int y, int w, int h)
+{
+    int x0, y0, x1, y1;
+
+    PlateBounds(x, y, w, h, &x0, &y0, &x1, &y1);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > W) x1 = W;
+    if (y1 > H) y1 = H;
+    return (PcHudBox){(short)x0, (short)y0, (short)(x1 - x0), (short)(y1 - y0)};
+}
+
+/* RUN as DrawRun draws it, at (x, y). */
+static void HudRun(const ViewState *s, int x, int y)
+{
+    bool8 available = (s->run & 2) != 0, on = available && (s->run & 1);
+    bool8 pressed = available && s->pressed == HIT_COLUMN + COL_RUN;
+    int oy = Plate(x, y, RUN_W, HEAD_H, !available ? sOffGrey : on || pressed ? sEmerald : sLight,
+                   pressed ? PLATE_STATE_PRESSED : PLATE_STATE_NORMAL);
+
+    IconCentred(on ? sArtShoeOn : sArtShoeOff, 3, 2 * x + RUN_W, 2 * oy + HEAD_H - 1, sArtPal.c, !available);
+    if (on)
+        FillRgb(x + RUN_W - 6, oy + 3, 2, 2, sLed);
+}
+
+/* A dock button as DrawDock draws it, at (x, y). */
+static void HudButton(const ViewState *s, int i, int x, int y, int w)
+{
+    bool8 enabled = (s->enabled >> i) & 1;
+    bool8 pressed = enabled && s->pressed == HIT_COLUMN + i;
+    const Icon *icon = &sRes.column[i];
+    int oy = Plate(x, y, w, DOCK_H, !enabled ? sOffGrey : pressed ? sEmerald : sLight,
+                   pressed ? PLATE_STATE_PRESSED : PLATE_STATE_NORMAL);
+
+    IconCentred(icon->tiles, icon->size, 2 * x + w, 2 * oy + DOCK_H - 1, icon->pal.c, !enabled);
+}
+
+static void HudDraw(const ViewState *s)
+{
+    u16 *savedDst = sDst;
+    int savedOX = sOX, savedHits = sHitCount, savedClip[4];
+    int x, w;
+
+    savedClip[0] = sClipX0;
+    savedClip[1] = sClipY0;
+    savedClip[2] = sClipX1;
+    savedClip[3] = sClipY1;
+    sClipX0 = sClipY0 = 0;
+    sClipX1 = W;
+    sClipY1 = H;
+    sOX = 0;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        u16 bg = pass == 0 ? 0x0000 : 0xFFFF;
+
+        for (int i = 0; i < W * H; ++i)
+            sHudCanvas[pass][i] = bg;
+        sDst = sHudCanvas[pass];
+        DrawTitle(s);
+        DrawRepel(s);
+        DrawClock(s);
+        HudRun(s, HUD_RUN_X, HUD_RUN_Y);
+        for (int i = 0; i < PC_HUD_BUTTONS; ++i)
+        {
+            DockButton(s, sHudSections[i], &x, &w);
+            HudButton(s, sHudSections[i], HUD_BUTTON_X + i * HUD_BUTTON_STEP, HUD_BUTTON_Y, w);
+        }
+    }
+    sDst = savedDst;
+    sOX = savedOX;
+    sHitCount = savedHits;
+    ClipPop(savedClip);
+}
+
+const unsigned short *CtrBottom_PcHudCanvas(int onWhite)
+{
+    return sHudCanvas[onWhite ? 1 : 0];
+}
+
+void CtrBottom_PcHud(PcHudInfo *o)
+{
+    const ViewState *s = &sShown;
+    int x, w, x0, y0, x1, y1, cx0, cy0, cx1, cy1;
+
+    memset(o, 0, sizeof(*o));
+    o->shown = s->mode == MODE_FIELD && s->dock && !s->dockLocked && !s->mapFly && gMain.callback2 == CB2_Overworld
+            && !ArePlayerFieldControlsLocked() && !ScriptContext_IsEnabled() && !gPaletteFade.active
+            && sFocus == FOCUS_NONE && sInside == INSIDE_NONE;
+    if (o->shown && (!sHudMade || memcmp(&sHudDrawn, s, sizeof(*s)) != 0))
+    {
+        HudDraw(s);
+        sHudDrawn = *s;
+        sHudMade = TRUE;
+        ++sHudVersion;
+    }
+    o->version = sHudVersion;
+
+    /* The header: the title (and the Repel's plate) and the clock, as one. */
+    TitleRect(s, &x0, &y0, &x1, &y1);
+    ClockRect(&cx0, &cy0, &cx1, &cy1);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    o->header = (PcHudBox){(short)x0, (short)y0, (short)(cx1 - x0), (short)((cy1 > y1 ? cy1 : y1) - y0)};
+    o->run = HudBounds(HUD_RUN_X, HUD_RUN_Y, RUN_W, HEAD_H);
+    o->runTap = (PcHudBox){RUN_X, HEAD_Y, RUN_W, HEAD_H};
+    for (int i = 0; i < PC_HUD_BUTTONS; ++i)
+    {
+        DockButton(s, sHudSections[i], &x, &w);
+        o->button[i] = HudBounds(HUD_BUTTON_X + i * HUD_BUTTON_STEP, HUD_BUTTON_Y, w, DOCK_H);
+        o->buttonTap[i] = (PcHudBox){(short)x, DOCK_TOP, (short)w, DOCK_H};
+        o->buttonOn[i] = (s->enabled >> sHudSections[i]) & 1;
+    }
+
+    o->mapArea = (PcHudBox){MAP_ORIGIN_X, MAP_ORIGIN_Y, MAP_PIC_W, MAP_PIC_H};
+    o->map = s->screen == SCR_MAP && s->mapsec != MAPSEC_NONE && !s->encView;
+    if (o->map)
+    {
+        int px, py;
+        CellCentre(s, s->cursorX, s->cursorY, &px, &py);
+        o->playerX = (short)px;
+        o->playerY = (short)py;
+    }
+    o->label[PC_HUD_PARTY] = CTR_TEXT("PARTY", "EQUIPO", "ÉQUIPE", "SQUADRA", "EQUIPE", "TEAM", "PARTY");
+    o->label[PC_HUD_BAG] = CTR_TEXT("BAG", "MOCHILA", "SAC", "BORSA", "MOCHILA", "BEUTEL", "BAG");
+    o->label[PC_HUD_SAVE] = CTR_TEXT("SAVE", "GUARDAR", "SAUVER", "SALVA", "SALVAR", "SICHERN", "SAVE");
+    o->label[PC_HUD_OPTIONS] = CTR_TEXT("OPTIONS", "OPCIONES", "OPTIONS", "OPZIONI", "OPÇÕES", "OPTIONEN", "OPTIONS");
+    o->runKey = CTR_TEXT("SHIFT", "MAYÚS", "MAJ", "MAIUSC", "SHIFT", "UMSCH", "SHIFT");
+}
+
+void CtrBottom_PcGoMap(void)
+{
+    if (sShown.mode != MODE_FIELD || sMapFly)
+        return;
+    if (sScreen == SCR_OPTION || sScreen == SCR_CARD || sScreen == SCR_NUZLOCKE)
+        sScreen = SCR_MAP; /* not SAVE: it may be writing */
+    sFocus = FOCUS_NONE;
+    sInside = INSIDE_NONE;
+}
+#endif
+
+#ifdef PORT_PC
+/* A PC's Escape (pc_display.c): out of what the bottom screen has open of its
+ * own - the Fly map, the keyboard focus on the dock, OPTIONS, the trainer
+ * card - back to the map. FALSE when nothing of its own is open (a game
+ * screen, the bag or the party, is the game's: the window gives it B). */
+bool8 CtrBottom_PcEscape(void)
+{
+    if (sShown.mode != MODE_FIELD)
+        return FALSE;
+    if (sMapFly)
+    {
+        CancelFlyMap();
+        return TRUE;
+    }
+    if (sFocus == FOCUS_NONE && sInside == INSIDE_NONE
+        && sScreen != SCR_OPTION && sScreen != SCR_CARD && sScreen != SCR_NUZLOCKE)
+        return FALSE;
+    if (sScreen == SCR_OPTION || sScreen == SCR_CARD || sScreen == SCR_NUZLOCKE)
+        sScreen = SCR_MAP;
+    LeaveFocus();
+    PlaySE(SE_SELECT);
+    return TRUE;
+}
+#endif
+
+#ifdef PORT_PC
+#include "pc_menu.h"
+
+/* The window's menu bar (pc_port/src/gl/pc_menu.c): the OPTIONS screen's
+ * table, row by row, in UTF-8. */
+
+/* A game string in UTF-8: CtrLocale_Glyph's map read backwards. */
+static void PcGameToUtf8(const u8 *text, char *out, size_t size)
+{
+    static u32 sBack[256];
+    static bool8 sMade;
+    size_t n = 0;
+
+    if (!sMade)
+    {
+        for (u32 c = 0x20; c < 0x180; ++c)
+        {
+            u8 g = CtrLocale_Glyph(c);
+            if (g != 0xAC && sBack[g] == 0)
+                sBack[g] = c;
+        }
+#if GAME_LANGUAGE == LANGUAGE_JAPANESE
+        for (u32 c = 0x3041; c <= 0x30FC; ++c)
+        {
+            u8 g = CtrLocale_Glyph(c);
+            if (g != 0xAC && sBack[g] == 0)
+                sBack[g] = c;
+        }
+#else
+        /* A few the map above does not give (constants/characters.h). */
+        sBack[0x2E] = '+';
+        sBack[0x35] = '=';
+        sBack[0x36] = ';';
+        sBack[0x5C] = '(';
+        sBack[0x5D] = ')';
+#endif
+        sBack[0x00] = ' ';
+        sBack[0xAC] = '?';
+        sMade = TRUE;
+    }
+    for (; text && *text != EOS && n + 4 < size; ++text)
+    {
+        u32 c = sBack[*text];
+        if (*text == EXT_CTRL_CODE_BEGIN)
+        {
+            /* A colour or the like: the code and its arguments. */
+            text += GetExtCtrlCodeLength(text[1]);
+            continue;
+        }
+        if (*text >= 0xF7 && *text != 0xF0)
+            continue; /* other control codes */
+        if (c == 0)
+            c = '?';
+        if (c < 0x80)
+            out[n++] = (char)c;
+        else if (c < 0x800)
+        {
+            out[n++] = (char)(0xC0 | (c >> 6));
+            out[n++] = (char)(0x80 | (c & 0x3F));
+        }
+        else
+        {
+            out[n++] = (char)(0xE0 | (c >> 12));
+            out[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out[n++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out[n] = '\0';
+}
+
+static const u8 sPcGameCounts[OPTION_ROWS] = {3, 2, 2, 2, 3, WINDOW_FRAMES_COUNT, 2, 2, 0, 0, 2, 2};
+
+static bool8 PcOptGet(int cat, int group, int row, OptRow *out)
+{
+    OptRow rows[OPT_ROWS_MAX];
+    int n;
+
+    if (cat < 0 || cat >= CAT_COUNT || group < 0 || group >= sCats[cat].count)
+        return FALSE;
+    n = GroupRows(&sCats[cat].groups[group], rows);
+    if (row < 0 || row >= n)
+        return FALSE;
+    *out = rows[row];
+    return TRUE;
+}
+
+int CtrBottom_PcOptCats(void)
+{
+    return CAT_COUNT;
+}
+
+const char *CtrBottom_PcOptCatName(int cat)
+{
+    return cat >= 0 && cat < CAT_COUNT && CatUsed(cat) ? sCats[cat].name : NULL;
+}
+
+int CtrBottom_PcOptGroups(int cat)
+{
+    return cat >= 0 && cat < CAT_COUNT ? sCats[cat].count : 0;
+}
+
+const char *CtrBottom_PcOptGroupName(int cat, int group)
+{
+    if (cat < 0 || cat >= CAT_COUNT || group < 0 || group >= sCats[cat].count)
+        return NULL;
+    return GroupUsed(&sCats[cat].groups[group]) ? sCats[cat].groups[group].name : NULL;
+}
+
+int CtrBottom_PcOptRows(int cat, int group)
+{
+    OptRow rows[OPT_ROWS_MAX];
+
+    if (cat < 0 || cat >= CAT_COUNT || group < 0 || group >= sCats[cat].count)
+        return 0;
+    return GroupRows(&sCats[cat].groups[group], rows);
+}
+
+/* The row's kind for the menu: a value with a fixed list of names is a
+ * choice; one with its own stepping or text (numbers, keys) is stepped. */
+static int PcOptKind(const OptRow *r)
+{
+    switch (RowKind(r))
+    {
+    case KIND_INFO: return PC_OPT_INFO;
+    case KIND_TOGGLE: return PC_OPT_TOGGLE;
+    case KIND_ACTION: return PC_OPT_ACTION;
+    }
+    if (r->def->type == ROW_GAME)
+        return sPcGameCounts[r->def->game] > 0 ? PC_OPT_CHOICE : PC_OPT_STEP;
+    if (r->extra->values && r->extra->count > 0 && !r->extra->step && !r->extra->text)
+        return PC_OPT_CHOICE;
+    return PC_OPT_STEP;
+}
+
+static int PcOptCurrent(const OptRow *r)
+{
+    u8 options[OPTION_ROWS];
+
+    ReadOptionValues(options);
+    if (RowKind(r) == KIND_TOGGLE)
+        return RowOn(r, options) ? 1 : 0;
+    if (r->def->type == ROW_GAME)
+        return options[r->def->game];
+    return r->extra->count ? (int)(CtrExtras_Value(r->extra) % r->extra->count) : 0;
+}
+
+bool CtrBottom_PcOptRow(int cat, int group, int row, PcOptRow *o)
+{
+    OptRow r;
+    u8 options[OPTION_ROWS];
+
+    if (!PcOptGet(cat, group, row, &r))
+        return FALSE;
+    memset(o, 0, sizeof(*o));
+    ReadOptionValues(options);
+    o->kind = PcOptKind(&r);
+    snprintf(o->label, sizeof(o->label), "%s",
+             r.def->type == ROW_EXTRA ? r.extra->name : (r.def->label ? r.def->label : ""));
+    o->live = o->kind != PC_OPT_INFO && RowLive(&r, CtrSettings_Voxel());
+    if (r.def->type == ROW_EXTRA && r.extra->key)
+        snprintf(o->key, sizeof(o->key), "%s", r.extra->key);
+    switch (o->kind)
+    {
+    case PC_OPT_TOGGLE:
+        o->current = PcOptCurrent(&r);
+        break;
+    case PC_OPT_CHOICE:
+        o->count = r.def->type == ROW_GAME ? sPcGameCounts[r.def->game] : r.extra->count;
+        o->current = PcOptCurrent(&r);
+        break;
+    case PC_OPT_ACTION:
+        PcGameToUtf8(ActionLabel2(&r), o->value, sizeof(o->value));
+        break;
+    case PC_OPT_STEP:
+        PcGameToUtf8(RowValueText(&r, options), o->value, sizeof(o->value));
+        break;
+    }
+    return TRUE;
+}
+
+void CtrBottom_PcOptChoiceName(int cat, int group, int row, int value, char *out, size_t size)
+{
+    OptRow r;
+
+    out[0] = '\0';
+    if (!PcOptGet(cat, group, row, &r) || value < 0)
+        return;
+    if (r.def->type == ROW_GAME)
+        PcGameToUtf8(OptionValue(r.def->game, (u8)value), out, size);
+    else if (r.extra->values && value < r.extra->count)
+        snprintf(out, size, "%s", r.extra->values[value]);
+}
+
+void CtrBottom_PcOptStep(int cat, int group, int row, int dir)
+{
+    OptRow r;
+
+    if (PcOptGet(cat, group, row, &r))
+        StepRow(&r, dir < 0);
+}
+
+void CtrBottom_PcOptSet(int cat, int group, int row, int value)
+{
+    OptRow r;
+
+    if (!PcOptGet(cat, group, row, &r) || !RowLive(&r, CtrSettings_Voxel()))
+        return;
+    for (int guard = 0; guard < 64 && PcOptCurrent(&r) != value; ++guard)
+        StepRow(&r, FALSE);
+}
+#endif

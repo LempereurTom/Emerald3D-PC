@@ -175,3 +175,8 @@ bool32 __wrap_IsPokemonCryPlaying(struct MusicPlayerInfo *info)
     CtrAudio_UnlockSound();
     return playing;
 }
+
+#ifdef PORT_PC
+/* The PC's MUSIC and EFFECTS volumes (pc_port/compat). */
+#include "pc_sound_volume.inc"
+#endif

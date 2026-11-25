@@ -206,6 +206,10 @@ static const u8 *SpeedText(void)
     return text;
 }
 
+#ifdef PORT_PC
+/* The PC port's options (pc_port/compat): display, controls. */
+#include "pc_extras_defs.inc"
+#endif
 const CtrExtra gCtrExtras[] =
 {
     /* Features add their lines here. */
@@ -260,6 +264,9 @@ const CtrExtra gCtrExtras[] =
 #include "3ds_nuzlocke_extras.inc"
 #include "3ds_randomizer_extras.inc"
     #include "3ds_field_qol_extras.inc"
+#ifdef PORT_PC
+#include "pc_extras.inc"
+#endif
     {0},
 };
 

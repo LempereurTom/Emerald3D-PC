@@ -223,9 +223,19 @@ def stage(tree: Path, rom_path: Path) -> None:
         assembly = ('.section .rodata.' + name + ',"a"\n.balign 4\n.global ' + name
                     + '\n.type ' + name + ', %object\n' + name + ':\n.incbin "' + blob
                     + '"\n.size ' + name + ', .-' + name + '\n')
+        # COFF (the PC port's Windows build): no .type/.size, a read-only
+        # .rdata$ section, and the target's C label prefix (_ on 32-bit
+        # Windows), which the generated code spells with __USER_LABEL_PREFIX__.
+        coff = ('__asm__(".section .rdata$' + name + ',\\"dr\\"\\n.balign 4\\n.global " EMERALD3DS_SYM('
+                + name + ') "\\n" EMERALD3DS_SYM(' + name + ') ":\\n.incbin \\"' + blob + '\\"\\n");')
         replacement = ("extern const struct TrainerHillFloor " + name + "[];\n"
                        '_Static_assert(sizeof(struct TrainerHillFloor) == 952, "TrainerHillFloor ABI differs");\n'
-                       + "__asm__(" + json.dumps(assembly) + ");")
+                       + "#ifdef __ELF__\n"
+                       + "__asm__(" + json.dumps(assembly) + ");\n"
+                       + "#else\n#ifndef EMERALD3DS_SYM\n#define EMERALD3DS_STR2(x) #x\n"
+                       + "#define EMERALD3DS_STR(x) EMERALD3DS_STR2(x)\n"
+                       + "#define EMERALD3DS_SYM(n) EMERALD3DS_STR(__USER_LABEL_PREFIX__) #n\n#endif\n"
+                       + coff + "\n#endif\n")
         text = text[:match.start()] + replacement + text[end + 1:]
     writes[path] = text.encode()
     path = tree / "include/constants/global.h"

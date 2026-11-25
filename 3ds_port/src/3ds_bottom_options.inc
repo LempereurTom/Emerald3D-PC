@@ -129,9 +129,17 @@ static const OptRowDef sRowsItems[] = {
     EXTRA_ROW("give_now"),
 };
 
+#ifdef PORT_PC
+/* The PC port's DISPLAY, CONTROLS and ABOUT (pc_port/compat). */
+#include "pc_options.inc"
+#endif
+
 static const OptGroupDef sGroupsGeneral[] = {
     GROUP(CTR_TEXT("INTERFACE", "INTERFAZ", "INTERFACE", "INTERFACCIA", "INTERFACE", "OBERFLÄCHE", "がめん"), sRowsUi),
     GROUP(CTR_TEXT("SYSTEM", "SISTEMA", "SYSTÈME", "SISTEMA", "SISTEMA", "SYSTEM", "システム"), sRowsSystem),
+#ifdef PORT_PC
+    PC_GENERAL_GROUPS,
+#endif
 };
 static const OptGroupDef sGroupsWorld[] = {
     GROUP("3D", sRows3d),
@@ -155,13 +163,20 @@ static const OptGroupDef sGroupsCheats[] = {
     GROUP(CTR_TEXT("ITEMS", "OBJETOS", "OBJETS", "OGGETTI", "ITENS", "ITEMS", "どうぐ"), sRowsItems),
 };
 
-enum { CAT_GENERAL, CAT_WORLD, CAT_BATTLE, CAT_MODES, CAT_CHEATS, CAT_COUNT };
+enum { CAT_GENERAL, CAT_WORLD, CAT_BATTLE, CAT_MODES, CAT_CHEATS,
+#ifdef PORT_PC
+       CAT_PC_DISPLAY, CAT_PC_CONTROLS,
+#endif
+       CAT_COUNT };
 static const OptCatDef sCats[CAT_COUNT] = {
     {CTR_TEXT("GENERAL", "GENERAL", "GÉNÉRAL", "GENERALE", "GERAL", "ALLGEMEIN", "ぜんぱん"), sGroupsGeneral, ARRAY_COUNT(sGroupsGeneral)},
     {CTR_TEXT("WORLD", "MUNDO", "MONDE", "MONDO", "MUNDO", "WELT", "せかい"), sGroupsWorld, ARRAY_COUNT(sGroupsWorld)},
     {CTR_TEXT("BATTLE", "COMBATE", "COMBAT", "LOTTA", "BATALHA", "KAMPF", "バトル"), sGroupsBattle, ARRAY_COUNT(sGroupsBattle)},
     {CTR_TEXT("MODES", "PARTIDA", "PARTIE", "PARTITA", "PARTIDA", "SPIELART", "モード"), sGroupsModes, ARRAY_COUNT(sGroupsModes)},
     {CTR_TEXT("CHEATS", "TRUCOS", "ASTUCES", "TRUCCHI", "TRAPAÇAS", "CHEATS", "チート"), sGroupsCheats, ARRAY_COUNT(sGroupsCheats)},
+#ifdef PORT_PC
+    PC_CATS
+#endif
 };
 
 #define OPT_GROUPS_MAX 4
@@ -769,8 +784,16 @@ static void OptionKeys(u16 down)
 
     if (down & B_BUTTON)
     {
+#ifdef PORT_PC
+        /* A PC's B (a pad's Circle, Escape) leaves OPTIONS for the map. */
+        sScreen = SCR_MAP;
+        sInside = INSIDE_NONE;
+        sFocus = FOCUS_NONE;
+        sSwallow = TRUE;
+#else
         sInside = INSIDE_NONE;
         sFocus = SCR_OPTION;
+#endif
         PlaySE(SE_SELECT);
         return;
     }

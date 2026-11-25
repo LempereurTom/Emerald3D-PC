@@ -20,7 +20,11 @@
 #define SETTINGS_TEMP "settings.txt.tmp"
 
 /* The voxel overworld is opt-in: the classic 2D field is the default. */
+#ifdef PORT_PC
+static bool sVoxel = true; /* see CtrSettings_Defaults */
+#else
 static bool sVoxel = false;
+#endif
 
 /*
  * The voxel camera: a few degrees either way of its 40 degree pitch, and a
@@ -102,7 +106,11 @@ static int Find(const int *values, int count, int value, int fallback)
  */
 void CtrSettings_Defaults(void)
 {
+#ifdef PORT_PC
+    sVoxel = true; /* the PC's default: the 3D world (a PC has the frame for it) */
+#else
     sVoxel = false;
+#endif
     sPitch = 2;
     sZoom = 1;
     sBlur = COUNT(sBlurs) - 1;
