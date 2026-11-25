@@ -1,0 +1,76 @@
+name: PC port
+
+# Emerald PC (pc_port/): the Windows build and its checks. Nothing built here
+# is uploaded: the development executable carries game content (built from
+# the decompilation's sources), and a release needs the player's kind of ROM
+# to write its recipe, so releases are made on the maintainer's machine
+# (pc_port/tools/pc_build_release.py, docs/PC_PORT_STATUS.md, J9).
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pc-host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Byte-compile the PC tools
+        run: python -m compileall -q pc_port/tools pc_port/tests
+      - name: Screen layouts (every layout, many window sizes)
+        run: |
+          gcc -std=gnu99 -O2 -Wall -I pc_port/src pc_port/tests/layout_geometry_test.c pc_port/src/pc_layout.c -lm -o lgt
+          ./lgt
+
+  pc-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            make git
+            mingw-w64-i686-gcc mingw-w64-i686-binutils
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-pillow
+            mingw-w64-ucrt-x86_64-arm-none-eabi-gcc
+      - name: SDL3 (MinGW development package)
+        run: |
+          curl -sSL -o sdl3.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-devel-3.4.20-mingw.tar.gz
+          mkdir -p /opt && tar -xzf sdl3.tar.gz -C /opt
+      - name: Game tree (pinned decompilation, patches)
+        run: |
+          git config --global core.autocrlf false
+          PATH=$PATH:/ucrt64/bin python tools/bootstrap.py --dir build/upstream-pc
+          PATH=$PATH:/ucrt64/bin make -C build/upstream-pc tools generated -j4
+      - name: Build (development, never uploaded)
+        run: make -C build/upstream-pc/3ds_port -f $PWD/pc_port/pc.mk pc -j4
+      - name: Save layouts match the console's
+        run: |
+          PATH=$PATH:/ucrt64/bin python pc_port/tests/layout_test.py --tree build/upstream-pc \
+              --arm-cc /ucrt64/bin/arm-none-eabi-gcc.exe --pc-cc i686-w64-mingw32-gcc
+      - name: The game data comes out of the executable (pc_release.py)
+        run: |
+          PATH=$PATH:/ucrt64/bin python pc_port/tools/pc_release.py --exe build/upstream-pc/3ds_port/emerald-pc.exe \
+              --romfs build/upstream-pc/3ds_port/build/pc-romfs --out build/pc-release-ci --nm /mingw32/bin/nm.exe
+
+  recomplauncher-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: recomplauncher.json against the official schema
+        run: |
+          pip install jsonschema
+          curl -sSL -o schema.json https://recomplauncher.com/schema/recomplauncher.json
+          python -c "import json, jsonschema; jsonschema.validate(json.load(open('recomplauncher.json', encoding='utf-8')), json.load(open('schema.json', encoding='utf-8'))); print('recomplauncher.json: valid')"

@@ -1,0 +1,44 @@
+{
+    "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+    "format": 1,
+    "name": "Emerald PC",
+    "inputs": [
+        {
+            "id": "game",
+            "role": "game",
+            "label": "Your own Pokémon Version Émeraude (France) ROM (.gba). This release is the French game.",
+            "formats": [
+                {
+                    "type": "file",
+                    "extensions": ["gba"]
+                }
+            ],
+            "dumps": [
+                {
+                    "name": "France (Pokémon Version Émeraude)",
+                    "crc32": "a3fdccb1",
+                    "size": 16777216
+                }
+            ]
+        }
+    ],
+    "prepare": {
+        "label": "Making the game data from your ROM",
+        "program": ["emerald-pc-builder.exe", "emerald-pc-builder"],
+        "args": ["--rom", "{input:game}", "--home", "{data}"],
+        "done": ["{data}/devdata/.emerald3ds-dev"]
+    },
+    "start": {
+        "program": ["emerald-pc.exe", "emerald-pc.AppImage", "emerald-pc"],
+        "args": ["--home", "{data}"]
+    },
+    "saves": [
+        "{data}/emerald3ds.sav",
+        "{data}/emerald3ds.clock",
+        "{data}/emerald3ds.nuzlocke",
+        "{data}/settings.txt"
+    ],
+    "exit_codes": {
+        "0": "ok"
+    }
+}
