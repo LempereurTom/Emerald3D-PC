@@ -1,3 +1,11 @@
+> ## Emerald PC — this fork
+>
+> **An unofficial PC port of [Emerald 3DS](https://github.com/ZallaxDev/emerald-3ds) by Zallax and contributors.** The same game, natively on Windows (no emulator): window or fullscreen, the FUSION single-screen layout (or the two screens side by side), the voxel 3D world on by default, keyboard, mouse and gamepads, volumes, ambient particles and weather, every option also in the window's menu bar. Saves are the console's: the same `emerald3ds.sav` works on both.
+>
+> **How to play.** Install it from [RecompLauncher](https://recomplauncher.com/), or download `EmeraldPC-vX.Y.Z-Windows-x86.zip` from the releases, extract it and run `emerald-pc.exe`. On its first run the game asks for **your own** ROM (this release: *Pokémon Version Émeraude*, France) and makes its data from it, on your PC, once. **No game content is in this repository or its releases.**
+>
+> What this fork changes, how it is built and released: [`pc_port/README.md`](pc_port/README.md), [`docs/PC_PORT_STATUS.md`](docs/PC_PORT_STATUS.md). Licence: CC BY-NC-SA 4.0 like Emerald 3DS (non-commercial; see `NOTICE.md`). Everything below is Emerald 3DS's own README.
+
 <p align="center">
   <img src="https://i.postimg.cc/XJRQB9cc/logo2.png" alt="Emerald 3DS" width="480">
 </p>
