@@ -12,7 +12,7 @@
 | J7 Toutes les ROM / langues | fait pour EN, FR, PT-BR (2026-11-24) ; ES/IT/DE/JP : il faut les ROM | voir « J7 : état » |
 | J8 Manettes, options PC, crédits | fait en automatique (2026-11-24) ; **manette et options à essayer par Tom** | voir « J8 : état » |
 | J9 Builds de release | fait en local (2026-11-25) pour le français ; **premier lancement à essayer par Tom** ; CI prête (fork à créer) | voir « J9 : état » |
-| J10 RecompLauncher | manifeste écrit (2026-11-25), validé à la main contre le schéma ; CI de validation prête ; **reste : fork, README du fork, soumission (Tom)** | voir « J10 : état » |
+| J10 RecompLauncher | fork https://github.com/LempereurTom/Emerald3D-PC, CI verte (manifeste validé contre le schéma), **release v0.1.0 publiée** (2026-11-25, français), ZallaxDev prévenu (issue #314) ; **reste : soumission sur recomplauncher.com (Tom)** | voir « J10 : état » |
 | J11 | — | |
 
 ## J10 : état
