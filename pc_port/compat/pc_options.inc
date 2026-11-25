@@ -31,6 +31,9 @@ static const OptRowDef sRowsPcScreen[] = {
     {ROW_INFO, 0, NULL, CTR_TEXT("F11: FULLSCREEN", "F11: PANT. COMPLETA", "F11 : PLEIN ÉCRAN", "F11: SCHERMO INTERO", "F11: TELA CHEIA", "F11: VOLLBILD", "F11: ぜんがめん")},
 };
 static const OptRowDef sRowsPcPicture[] = {
+    EXTRA_ROW("pc_gfx_preset"),
+    EXTRA_ROW("pc_render_scale"),
+    EXTRA_ROW("pc_msaa"),
     EXTRA_ROW("pc_stretch"),
     EXTRA_ROW("pc_filter"),
     EXTRA_ROW("pc_colors"),

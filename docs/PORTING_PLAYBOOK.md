@@ -110,6 +110,7 @@ de tables du jeu en littéral (plafond 4 096), graphismes 99,98 %, cartes 100 %.
 | CI 3DS bloquée 1 h, log de 1,28 Go | ASan + ASLR forte des runners Linux récents (`DEADLYSIGNAL` en boucle) | `-fno-pie -no-pie` (correctif de l'amont) |
 | Test accéléré interminable | le son suit le temps réel | `audio_clock=0` avec `EMERALD_PC_NOPACE` |
 | Python 3.13 exigé par `voxel_precompile.py` | pin de l'amont pour ses releases | pour le PC, vérifier avec le Python qui a fait les fichiers |
+| Pointillés sombres entre les tuiles avec l'anticrénelage | le MSAA échantillonne hors du triangle : texels voisins de l'atlas | `centroid` sur les variables interpolées |
 | Texte du jeu illisible dans un menu natif | codes de contrôle `0xFC` + arguments | `GetExtCtrlCodeLength` |
 
 ## 6. Commandes de référence

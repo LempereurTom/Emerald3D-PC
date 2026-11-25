@@ -301,6 +301,10 @@ static void LayoutChanged(void)
 
 static bool sStretch, sSmooth;
 static int sColours; /* pc_colors: 0 off, 1 light, 2 strong */
+/* The top screen's texture: this many times the screen (the 3D resolution). */
+static int sTopScale = 1;
+int PcC3d_TargetScale(C3D_RenderTarget *target);
+void PcC3d_SetQuality(int scale, int samples);
 static bool sParticles; /* pc_particles */
 int PcGame_Ambience(void);
 void PcAmbience_Draw(const PcRect *top, int fbW, int fbH, int ambience, float dt);
@@ -357,6 +361,54 @@ static int WindowScale(void)
     return index >= 0 && index < 6 ? index + 1 : 2;
 }
 
+/*
+ * GRAPHICS: the 3D world's resolution (1x-4x the console's 400x240) and its
+ * anti-aliasing (multisampling), the look unchanged otherwise (pc_c3d_mem.c,
+ * PcC3d_SetQuality). A preset sets both; changing either by hand makes the
+ * preset CUSTOM. EMERALD_PC_QUALITY=scale,samples (checks) overrides.
+ */
+static const int sPresetValues[4][2] = { { 0, 0 }, { 1, 1 }, { 2, 2 }, { 3, 3 } }; /* scale, msaa indexes */
+
+static void ApplyGraphics(void)
+{
+    static int sLastPreset = -1;
+    int preset = CtrSettings_GetInt("pc_gfx_preset", 2);
+    int scale = CtrSettings_GetInt("pc_render_scale", -1), msaa = CtrSettings_GetInt("pc_msaa", -1);
+
+    if (preset >= 0 && preset < 4)
+    {
+        if (sLastPreset >= 0 && preset != sLastPreset)
+        {
+            /* A preset chosen: its values. */
+            scale = sPresetValues[preset][0];
+            msaa = sPresetValues[preset][1];
+            CtrSettings_SetInt("pc_render_scale", scale);
+            CtrSettings_SetInt("pc_msaa", msaa);
+        }
+        else if (scale < 0 || msaa < 0)
+        {
+            /* Never set: the preset's, nothing written. */
+            scale = sPresetValues[preset][0];
+            msaa = sPresetValues[preset][1];
+        }
+        else if (scale != sPresetValues[preset][0] || msaa != sPresetValues[preset][1])
+        {
+            preset = 4; /* a value changed by hand */
+            CtrSettings_SetInt("pc_gfx_preset", preset);
+        }
+    }
+    sLastPreset = preset;
+    if (scale < 0 || scale > 3)
+        scale = 2;
+    if (msaa < 0 || msaa > 3)
+        msaa = 2;
+    int k = scale + 1, samples = msaa == 0 ? 1 : 1 << msaa;
+    const char *env = getenv("EMERALD_PC_QUALITY");
+    if (env && *env)
+        sscanf(env, "%d,%d", &k, &samples);
+    PcC3d_SetQuality(k, samples);
+}
+
 void PcOptions_Apply(void)
 {
     if (sWindow == NULL)
@@ -370,6 +422,7 @@ void PcOptions_Apply(void)
     sWeather = CtrSettings_GetInt("pc_weather", 1) != 0;
     sSmooth = CtrSettings_GetInt("pc_filter", 0) != 0;
     SDL_GL_SetSwapInterval(CtrSettings_GetInt("pc_vsync", 0) != 0 ? 1 : 0);
+    ApplyGraphics();
 
     int mode = CtrSettings_GetInt("pc_window", 0);
     SDL_DisplayID display = SDL_GetDisplayForWindow(sWindow);
@@ -788,7 +841,9 @@ static void SamplingFor(const PcRect *r, float width)
     bool whole = fabsf(scale - roundf(scale)) < 0.01f;
     bool linear = sBlitForWindow && (sSmooth || !whole);
 
-    sBlitSharpValue = sBlitForWindow && !sSmooth && !whole ? scale : 0.0f;
+    /* A picture drawn bigger than the window (a high 3D resolution in a
+     * small window) is averaged down, never made "sharp". */
+    sBlitSharpValue = sBlitForWindow && !sSmooth && !whole && scale > 1.0f ? scale : 0.0f;
     pglSamplerParameteri(sBlitSampler, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
     pglSamplerParameteri(sBlitSampler, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
 }
@@ -803,7 +858,7 @@ static void BlitTop(GLuint top, bool topGpu, const PcLayout *layout, int fbW, in
     static const float sGrades[3][2] = { { 0.0f, 0.0f }, { 0.06f, 0.14f }, { 0.13f, 0.28f } };
     int grade = sBlitForWindow && sColours >= 0 && sColours <= 2 ? sColours : 0;
 
-    SamplingFor(&layout->top, 400.0f);
+    SamplingFor(&layout->top, 400.0f * sTopScale); /* the 3D resolution's texels */
     sBlitTintValue = layout->topDimmed ? 0.4f : 1.0f;
     if (sBlitForWindow && sRainNow > 0.0f)
     {
@@ -999,6 +1054,7 @@ void PcDisplay_Present(C3D_RenderTarget *top, C3D_RenderTarget *bottom)
     sLastBottom = bottom;
     GLuint topTex = PcC3d_TargetTexture(top);
     bool topGpu = topTex != 0;
+    sTopScale = topGpu ? PcC3d_TargetScale(top) : 1;
     if (topTex == 0)
     {
         UploadCpuScreen(sTopCpuTex, sTopFb, 240, 400, sFormat[0]);

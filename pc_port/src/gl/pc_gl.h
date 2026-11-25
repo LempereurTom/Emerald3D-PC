@@ -64,6 +64,8 @@
     X(void, DeleteRenderbuffers, (GLsizei n, const GLuint *r))                                               \
     X(void, BindRenderbuffer, (GLenum t, GLuint r))                                                          \
     X(void, RenderbufferStorage, (GLenum t, GLenum f, GLsizei w, GLsizei h))                                 \
+    X(void, RenderbufferStorageMultisample, (GLenum t, GLsizei n, GLenum f, GLsizei w, GLsizei h))                 \
+    X(void, GetIntegerv, (GLenum p, GLint *v))                                                                     \
     X(GLuint, CreateShader, (GLenum type))                                                                   \
     X(void, ShaderSource, (GLuint s, GLsizei n, const GLchar *const *src, const GLint *len))                 \
     X(void, CompileShader, (GLuint s))                                                                       \

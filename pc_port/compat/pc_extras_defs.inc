@@ -32,6 +32,20 @@ static const char *const sPcColours[] = {
     CTR_TEXT("VERY VIVID", "MUY VIVO", "TRÈS VIVES", "MOLTO VIVACI", "MUITO VIVAS", "SEHR LEBHAFT", "とても あざやか"),
 };
 static const char *const sPcPadLayouts[] = {"XBOX", "NINTENDO"};
+/* GRAPHICS (pc_display.c's PcOptions_Apply): a preset sets the 3D resolution
+ * and the anti-aliasing; changing either makes it CUSTOM. */
+static const char *const sPcPresets[] = {
+    CTR_TEXT("LOW", "BAJO", "BAS", "BASSO", "BAIXO", "NIEDRIG", "ひくい"),
+    CTR_TEXT("MEDIUM", "MEDIO", "MOYEN", "MEDIO", "MÉDIO", "MITTEL", "ふつう"),
+    CTR_TEXT("HIGH", "ALTO", "ÉLEVÉ", "ALTO", "ALTO", "HOCH", "たかい"),
+    "ULTRA",
+    CTR_TEXT("CUSTOM", "PERSONAL.", "PERSO.", "PERSONAL.", "PERSONAL.", "EIGENE", "カスタム"),
+};
+static const char *const sPcRenderScales[] = {"1X", "2X", "3X", "4X"};
+static const char *const sPcMsaa[] = {
+    CTR_TEXT("OFF", "NO", "NON", "NO", "NÃO", "AUS", "オフ"),
+    "2X", "4X", "8X",
+};
 static const char *const sPcVolumes[] = {"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"};
 static const char *const sPcReset[] = {
     CTR_TEXT("RESET", "RESTABLECER", "RÉTABLIR", "RIPRISTINA", "RESTAURAR", "ZURÜCKSETZEN", "もどす"),

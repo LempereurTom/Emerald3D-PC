@@ -51,8 +51,26 @@ typedef struct PcSurface
     GLuint fbo;  /* when drawn into */
     GLuint depthRb;
     struct PcSurface *depth; /* the depth surface attached to this colour one */
+    /* Quality (PcC3d_SetQuality): the picture's surfaces drawn at `scale`
+     * times their size in GL (memory keeps the console's size), and with
+     * `samples` multisampling into msaaFbo, resolved into `tex` when it is
+     * read (PcSurface_Resolve). */
+    u8 scale, samples;
+    bool msaaDirty; /* msaaFbo drawn into since the last resolve */
+    bool msaaStale; /* tex newer than msaaFbo (an upload): copied before drawing */
+    GLuint msaaFbo, msaaColorRb, msaaDepthRb;
     struct PcSurface *next;
 } PcSurface;
+
+/* The picture's quality: its 3D surfaces at `scale` (1-4) times the
+ * console's size, `samples` (1, 2, 4, 8) multisampling. */
+void PcC3d_SetQuality(int scale, int samples);
+/* The frame buffer a draw goes into: the multisampled one when it has one. */
+GLuint PcSurface_DrawFbo(PcSurface *color, PcSurface *depth);
+/* Its multisampled drawing into its texture, before the texture is read. */
+void PcSurface_Resolve(PcSurface *s);
+/* Before drawing into it: an upload copied into the multisampled buffer. */
+void PcSurface_PrepareDraw(PcSurface *s);
 
 /* Surfaces: registered when the shim allocates GPU memory for them. */
 PcSurface *PcSurface_Create(void *mem, u32 bytes, u16 width, u16 height, int kind, int fmt);

@@ -32,10 +32,12 @@ const u32 render2d_shbin_size = sizeof(render2d_shbin);
     "uniform ivec4 uI[4];\n"                                                         \
     "uniform int uB;\n"                                                              \
     "uniform vec2 uDepthMap;\n"                                                      \
-    "out vec4 vColor;\n"                                                             \
-    "out vec2 vTc0;\n"                                                               \
-    "out vec2 vTc1;\n"                                                               \
-    "out vec2 vTc2;\n"                                                               \
+    /* centroid: with multisampling (pc_msaa), never a texel from outside */         \
+    /* the triangle (an atlas neighbour); without it, the same as before. */         \
+    "centroid out vec4 vColor;\n"                                                    \
+    "centroid out vec2 vTc0;\n"                                                      \
+    "centroid out vec2 vTc1;\n"                                                      \
+    "centroid out vec2 vTc2;\n"                                                      \
     /* PICA clip space -> GL: x, y and w as they are; the PICA's depth is */         \
     /* z/w * zScale + zOffset in [0, 1] (citro3d C3D_DepthMap), GL's is */           \
     /* (z/w + 1) / 2. */                                                             \
@@ -117,10 +119,10 @@ static const char sWeatherVs[] = GLSL_VERTEX_COMMON
 
 static const char sFragment[] =
     "#version 330 core\n"
-    "in vec4 vColor;\n"
-    "in vec2 vTc0;\n"
-    "in vec2 vTc1;\n"
-    "in vec2 vTc2;\n"
+    "centroid in vec4 vColor;\n"
+    "centroid in vec2 vTc0;\n"
+    "centroid in vec2 vTc1;\n"
+    "centroid in vec2 vTc2;\n"
     "out vec4 fragColor;\n"
     "uniform sampler2D uTex0;\n"
     "uniform sampler2D uTex1;\n"

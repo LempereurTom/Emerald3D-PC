@@ -700,6 +700,7 @@ static PendingDraw *sPending;
 static u32 sPendingCount, sPendingCap;
 static bool sFlushing;
 static PcSurface *sDrawColor;
+static GLint sDrawScale = 1; /* the quality's scale of the surface drawn into */
 
 static PendingDraw *Record(u8 op)
 {
@@ -753,11 +754,17 @@ static bool BindTarget(const PendingDraw *d)
     if (color == NULL)
         return false;
     PcSurface_SyncToGl(color);
-    GLuint fbo = PcSurface_Framebuffer(color, depth);
+    GLuint fbo = PcSurface_DrawFbo(color, depth);
+    PcSurface_PrepareDraw(color);
     pglBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    pglViewport((GLint)d->ctx.viewport[0], (GLint)d->ctx.viewport[1], (GLsizei)d->ctx.viewport[2],
-                (GLsizei)d->ctx.viewport[3]);
+    /* The quality's scale (PcC3d_SetQuality): the same picture, finer. */
+    GLint k = color->scale;
+    pglViewport((GLint)d->ctx.viewport[0] * k, (GLint)d->ctx.viewport[1] * k, (GLsizei)d->ctx.viewport[2] * k,
+                (GLsizei)d->ctx.viewport[3] * k);
     sDrawColor = color;
+    sDrawScale = k;
+    if (color->samples > 1)
+        color->msaaDirty = true;
     return true;
 }
 
@@ -765,7 +772,8 @@ void PcC3d_ApplyTargetState(void)
 {
     /* A clear rebinds frame buffers and masks: the next draw restores its
      * own state completely, so nothing is needed here beyond the binding. */
-    pglBindFramebuffer(GL_FRAMEBUFFER, sDrawColor ? sDrawColor->fbo : 0);
+    pglBindFramebuffer(GL_FRAMEBUFFER, sDrawColor ? (sDrawColor->msaaFbo && sDrawColor->samples > 1
+                                                     ? sDrawColor->msaaFbo : sDrawColor->fbo) : 0);
 }
 
 static const GLenum sTestFunc[] = { GL_NEVER, GL_ALWAYS, GL_EQUAL, GL_NOTEQUAL, GL_LESS, GL_LEQUAL, GL_GREATER, GL_GEQUAL };
@@ -839,7 +847,8 @@ static void ApplyFixedFunction(const PcC3dContext *c)
     {
         pglEnable(GL_SCISSOR_TEST);
         u32 l = c->scissor[0], t = c->scissor[1], r = c->scissor[2], b = c->scissor[3];
-        pglScissor((GLint)l, (GLint)t, r > l ? (GLsizei)(r - l) : 0, b > t ? (GLsizei)(b - t) : 0);
+        GLint k = sDrawScale;
+        pglScissor((GLint)l * k, (GLint)t * k, r > l ? (GLsizei)(r - l) * k : 0, b > t ? (GLsizei)(b - t) * k : 0);
     }
     else
         pglDisable(GL_SCISSOR_TEST);
@@ -907,7 +916,8 @@ static void ApplyProgramUniforms(GLuint program, const PendingDraw *d)
     pglUniform1i(U(program, "uAlphaFunc"), c->alphaTestEnable ? (GLint)c->alphaFunc : -1);
     pglUniform1i(U(program, "uAlphaRef"), c->alphaRef);
     pglUniform1i(U(program, "uScissorInvert"), c->scissorMode == GPU_SCISSOR_INVERT);
-    GLint sc[4] = { (GLint)c->scissor[0], (GLint)c->scissor[1], (GLint)c->scissor[2], (GLint)c->scissor[3] };
+    GLint sc[4] = { (GLint)c->scissor[0] * sDrawScale, (GLint)c->scissor[1] * sDrawScale,
+                    (GLint)c->scissor[2] * sDrawScale, (GLint)c->scissor[3] * sDrawScale };
     pglUniform4iv(U(program, "uScissor"), 1, sc);
 
     /* Procedural texture */
@@ -949,6 +959,7 @@ static void BindTextures(GLuint program, const PendingDraw *d)
             continue;
         }
         PcSurface_SyncToGl(s);
+        PcSurface_Resolve(s); /* a picture drawn multisampled, read as a texture */
         pglBindTexture(GL_TEXTURE_2D, s->tex);
         u32 p = tex.param;
         pglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (p >> 1) & 1 ? GL_LINEAR : GL_NEAREST);
@@ -1183,5 +1194,13 @@ GLuint PcC3d_TargetTexture(C3D_RenderTarget *target)
     if (s == NULL)
         return 0;
     PcSurface_SyncToGl(s);
+    PcSurface_Resolve(s);
     return s->tex;
+}
+
+/* Its scale (the quality's): the texture is that many times the screen. */
+int PcC3d_TargetScale(C3D_RenderTarget *target)
+{
+    PcSurface *s = target && target->frameBuf.colorBuf ? PcSurface_Find(target->frameBuf.colorBuf) : NULL;
+    return s ? s->scale : 1;
 }

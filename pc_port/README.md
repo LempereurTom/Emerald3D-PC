@@ -133,6 +133,7 @@ from the player's ROM into `<home>/devdata` on the first run
 | `EMERALD_PC_FRAMES` | — | stop after N frames (headless checks) |
 | `EMERALD_PC_HIDDEN` | — | `1`: no visible window |
 | `EMERALD_PC_SCALE` | 2 | initial window scale |
+| `EMERALD_PC_QUALITY` | (settings) | `scale,samples`: the 3D resolution (1-4) and multisampling (1, 2, 4, 8), over the GRAPHICS preset (checks) |
 | `EMERALD_PC_AMBIENCE` | (the place's) | `leaves`, `petals`, `dust`, `night` or `rain`: forces an ambience (checks) |
 | `EMERALD_PC_LAYOUT` | (settings) | `vertical`, `side`, `inset` or `single`, over `settings.txt`'s `pc_layout` |
 | `EMERALD_PC_SWAP` | (settings) | `1`: the screens swapped, over `pc_swap` |

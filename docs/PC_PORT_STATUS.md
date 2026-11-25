@@ -13,7 +13,26 @@
 | J8 Manettes, options PC, crédits | fait en automatique (2026-11-24) ; **manette et options à essayer par Tom** | voir « J8 : état » |
 | J9 Builds de release | fait en local (2026-11-25) pour le français ; **premier lancement à essayer par Tom** ; CI prête (fork à créer) | voir « J9 : état » |
 | J10 RecompLauncher | fork https://github.com/LempereurTom/Emerald3D-PC, CI verte (manifeste validé contre le schéma), **release v0.1.0 publiée** (2026-11-25, français), ZallaxDev prévenu (issue #314) ; **reste : soumission sur recomplauncher.com (Tom)** | voir « J10 : état » |
+| J8 bis Graphismes (presets) | fait (2026-11-25) ; **à essayer par Tom** | voir « Graphismes : état » |
 | J11 | — | |
+
+## Graphismes : état
+- **IMAGE** (ÉCRAN dans OPTIONS) gagne trois lignes : GRAPHISMES (BAS, MOYEN, ÉLEVÉ par défaut,
+  ULTRA, PERSO.), RÉSOLUTION 3D (1x–4x les 400x240 de la console) et ANTICRÉNELAGE (non, 2x, 4x,
+  8x, multiéchantillonnage). Presets : Bas 1x sans AA, Moyen 2x/2x, Élevé 3x/4x, Ultra 4x/8x ;
+  changer une des deux valeurs à la main passe en PERSO. Réglages `pc_gfx_preset`,
+  `pc_render_scale`, `pc_msaa` ; `EMERALD_PC_QUALITY=échelle,échantillons` les remplace (tests).
+- Seul le monde 3D (la texture logique 512x256 et l'écran du haut) est rendu plus grand ; les
+  textures, couleurs, effets et la 2D ne changent pas. Lectures CPU par réduction au plus proche,
+  MSAA résolu avant chaque lecture ou affichage (`pc_c3d_mem.c`).
+- **Vérifié** : en 1x sans AA, les 734 images des 4 scénarios de non-régression sont identiques
+  à celles d'avant au pixel près (seules diffèrent les 33 images extérieures qui varient déjà d'une
+  exécution à l'autre). Captures des 4 presets : dehors, maison, titre, présentation de Birch.
+  Défaut trouvé et corrigé : avec le MSAA, des pointillés sombres entre les tuiles (texels voisins
+  de l'atlas) → interpolation `centroid` dans les shaders (sans effet sans MSAA).
+- **Performances** (RX 9070 XT, 1080p, FUSION) : environ 900 images/s sans limite dans tous les
+  presets (Ultra -7 %) ; à 60 images/s, 12–14 % d'un cœur CPU. Rien à optimiser qui vaille le
+  risque d'un défaut ; BAS reste le choix des petits PC.
 
 ## J10 : état
 - Lu avant d'écrire : le schéma officiel (`https://recomplauncher.com/schema/recomplauncher.json`,

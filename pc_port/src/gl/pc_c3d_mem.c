@@ -393,6 +393,8 @@ PcSurface *PcSurface_Create(void *mem, u32 bytes, u16 width, u16 height, int kin
     s->kind = (u8)kind;
     s->fmt = (u8)fmt;
     s->cpuNewer = true;
+    s->scale = 1;
+    s->samples = 1;
     if (kind != PC_SURFACE_DEPTH)
     {
         pglGenTextures(1, &s->tex);
@@ -429,6 +431,12 @@ void PcSurface_Destroy(PcSurface *s)
         pglDeleteFramebuffers(1, &s->fbo);
     if (s->depthRb)
         pglDeleteRenderbuffers(1, &s->depthRb);
+    if (s->msaaFbo)
+        pglDeleteFramebuffers(1, &s->msaaFbo);
+    if (s->msaaColorRb)
+        pglDeleteRenderbuffers(1, &s->msaaColorRb);
+    if (s->msaaDepthRb)
+        pglDeleteRenderbuffers(1, &s->msaaDepthRb);
     if (s->tex)
         pglDeleteTextures(1, &s->tex);
     free(s);
@@ -488,6 +496,252 @@ static void FlushRange(const void *addr, u32 size)
             s->hashChecked = false;
 }
 
+/* ── Quality: the picture at more than the console's size ─────────────── */
+
+/*
+ * The surfaces the picture is made in - the logical surface (512x256: the
+ * voxel world and the game's layers composed) and the top screen (240x400,
+ * or 240x800 wide) - can be drawn at 2-4 times their size, with
+ * multisampling. Everything drawn into them is scaled with them (viewport,
+ * scissor, depth buffer), so the 3D edges get finer while every texture is
+ * sampled as before: the pixel art, nearest-sampled, stays exactly as it is.
+ * Their memory keeps the console's size: a read by the CPU side gets the
+ * picture at that size (one sample a pixel), an upload is spread back to
+ * the scaled size. Every other surface (tiles, layers, sprites, the bloom)
+ * stays at 1x.
+ */
+static int sQualityScale = 1, sQualitySamples = 1;
+
+void PcC3d_SetQuality(int scale, int samples)
+{
+    GLint maxSamples = 1;
+    pglGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+    sQualityScale = scale < 1 ? 1 : scale > 4 ? 4 : scale;
+    sQualitySamples = samples <= 1 ? 1 : samples > maxSamples ? maxSamples : samples;
+}
+
+static bool QualityEligible(const PcSurface *s)
+{
+    if (s->kind == PC_SURFACE_TEXTURE)
+        return s->width == 512 && s->height == 256 && s->fmt == GPU_RGBA8;
+    if (s->kind == PC_SURFACE_COLOR)
+        return s->width == 240 && (s->height == 400 || s->height == 800);
+    return false;
+}
+
+static void FreeMsaa(PcSurface *s)
+{
+    if (s->msaaFbo)
+        pglDeleteFramebuffers(1, &s->msaaFbo);
+    if (s->msaaColorRb)
+        pglDeleteRenderbuffers(1, &s->msaaColorRb);
+    if (s->msaaDepthRb)
+        pglDeleteRenderbuffers(1, &s->msaaDepthRb);
+    s->msaaFbo = s->msaaColorRb = s->msaaDepthRb = 0;
+    s->msaaDirty = s->msaaStale = false;
+}
+
+/* The surface at the quality asked for: its GL storage made again when it
+ * changed (what it held is drawn again by the next frame). */
+static void ApplyQuality(PcSurface *color, PcSurface *depth)
+{
+    bool eligible = QualityEligible(color);
+    u8 scale = (u8)(eligible ? sQualityScale : 1), samples = (u8)(eligible ? sQualitySamples : 1);
+    if (color->scale == scale && color->samples == samples)
+        return;
+    if (color->fbo)
+    {
+        pglDeleteFramebuffers(1, &color->fbo);
+        color->fbo = 0;
+    }
+    if (depth && depth->depthRb)
+    {
+        pglDeleteRenderbuffers(1, &depth->depthRb);
+        depth->depthRb = 0;
+    }
+    FreeMsaa(color);
+    if (color->scale != scale)
+    {
+        pglBindTexture(GL_TEXTURE_2D, color->tex);
+        pglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, color->width * scale, color->height * scale, 0, GL_RGBA,
+                      GL_UNSIGNED_BYTE, NULL);
+        if (!color->gpuNewer)
+            color->cpuNewer = true; /* its memory spread into the new size */
+    }
+    color->scale = scale;
+    color->samples = samples;
+    color->depth = NULL; /* the frame buffer is made again */
+}
+
+static void MakeMsaa(PcSurface *color, PcSurface *depth)
+{
+    GLsizei w = color->width * color->scale, h = color->height * color->scale;
+    GLint draw = 0;
+    if (color->msaaFbo)
+        return;
+    pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    pglGenRenderbuffers(1, &color->msaaColorRb);
+    pglBindRenderbuffer(GL_RENDERBUFFER, color->msaaColorRb);
+    pglRenderbufferStorageMultisample(GL_RENDERBUFFER, color->samples, GL_RGBA8, w, h);
+    if (depth)
+    {
+        pglGenRenderbuffers(1, &color->msaaDepthRb);
+        pglBindRenderbuffer(GL_RENDERBUFFER, color->msaaDepthRb);
+        pglRenderbufferStorageMultisample(GL_RENDERBUFFER, color->samples, GL_DEPTH24_STENCIL8, w, h);
+    }
+    pglGenFramebuffers(1, &color->msaaFbo);
+    pglBindFramebuffer(GL_FRAMEBUFFER, color->msaaFbo);
+    pglFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color->msaaColorRb);
+    if (depth)
+        pglFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, color->msaaDepthRb);
+    if (pglCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        fprintf(stderr, "[VIDEO] multisampled frame buffer %dx%d x%d refused: without\n", w, h, color->samples);
+        FreeMsaa(color);
+        color->samples = 1;
+    }
+    else
+        color->msaaStale = true; /* the texture's picture copied in before a draw */
+    pglBindFramebuffer(GL_FRAMEBUFFER, (GLuint)draw);
+}
+
+void PcSurface_Resolve(PcSurface *s)
+{
+    if (s == NULL || !s->msaaDirty || !s->msaaFbo)
+        return;
+    GLint draw = 0, read = 0;
+    GLsizei w = s->width * s->scale, h = s->height * s->scale;
+    pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    pglGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, s->msaaFbo);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, s->fbo);
+    pglDisable(GL_SCISSOR_TEST);
+    pglBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+    s->msaaDirty = false;
+}
+
+/* A 1x picture in a scratch texture, for the scaled copies. */
+static GLuint sTmpTex, sTmpFbo;
+static GLsizei sTmpW, sTmpH;
+
+static void TmpTarget(GLsizei w, GLsizei h)
+{
+    if (sTmpTex == 0)
+    {
+        pglGenTextures(1, &sTmpTex);
+        pglGenFramebuffers(1, &sTmpFbo);
+    }
+    if (w != sTmpW || h != sTmpH)
+    {
+        GLint draw = 0;
+        pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+        pglBindTexture(GL_TEXTURE_2D, sTmpTex);
+        pglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        pglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        pglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        pglBindFramebuffer(GL_FRAMEBUFFER, sTmpFbo);
+        pglFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sTmpTex, 0);
+        pglBindFramebuffer(GL_FRAMEBUFFER, (GLuint)draw);
+        sTmpW = w;
+        sTmpH = h;
+    }
+}
+
+/* Memory into a scaled surface: each pixel spread over its scale x scale. */
+static void UploadScaled(PcSurface *s, const u8 *rgba)
+{
+    GLint draw = 0, read = 0;
+    pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    pglGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    TmpTarget(s->width, s->height);
+    pglBindTexture(GL_TEXTURE_2D, sTmpTex);
+    pglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    pglTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    GLuint fbo = s->fbo ? s->fbo : PcSurface_Framebuffer(s, s->depth);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, sTmpFbo);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+    pglDisable(GL_SCISSOR_TEST);
+    pglBlitFramebuffer(0, 0, s->width, s->height, 0, 0, s->width * s->scale, s->height * s->scale,
+                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+}
+
+/* A scaled surface into memory: one sample a pixel, its centre's. */
+static void ReadScaled(PcSurface *s, u8 *rgba)
+{
+    GLint draw = 0, read = 0;
+    pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    pglGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    TmpTarget(s->width, s->height);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, sTmpFbo);
+    pglDisable(GL_SCISSOR_TEST);
+    pglBlitFramebuffer(0, 0, s->width * s->scale, s->height * s->scale, 0, 0, s->width, s->height,
+                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, sTmpFbo);
+    pglPixelStorei(GL_PACK_ALIGNMENT, 1);
+    pglReadPixels(0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    pglBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+}
+
+/* The texture's picture into the multisampled buffer (a blit cannot write a
+ * multisampled buffer): a quad that copies it. */
+static GLuint sCopyProgram, sCopyVao;
+
+void PcSurface_PrepareDraw(PcSurface *s)
+{
+    if (s == NULL || !s->msaaStale || !s->msaaFbo)
+        return;
+    if (sCopyProgram == 0)
+    {
+        static const char *vs = "#version 330 core\n"
+            "out vec2 vSt;\n"
+            "void main() { vec2 c = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));\n"
+            "    vSt = c; gl_Position = vec4(c * 2.0 - 1.0, 0.0, 1.0); }\n";
+        static const char *fs = "#version 330 core\n"
+            "in vec2 vSt; out vec4 fragColor; uniform sampler2D uTex;\n"
+            "void main() { fragColor = texture(uTex, vSt); }\n";
+        GLuint v = pglCreateShader(GL_VERTEX_SHADER), f = pglCreateShader(GL_FRAGMENT_SHADER);
+        pglShaderSource(v, 1, &vs, NULL);
+        pglCompileShader(v);
+        pglShaderSource(f, 1, &fs, NULL);
+        pglCompileShader(f);
+        sCopyProgram = pglCreateProgram();
+        pglAttachShader(sCopyProgram, v);
+        pglAttachShader(sCopyProgram, f);
+        pglBindFragDataLocation(sCopyProgram, 0, "fragColor");
+        pglLinkProgram(sCopyProgram);
+        pglGenVertexArrays(1, &sCopyVao);
+    }
+    GLint draw = 0, viewport[4];
+    pglGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    pglGetIntegerv(GL_VIEWPORT, viewport);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, s->msaaFbo);
+    pglViewport(0, 0, s->width * s->scale, s->height * s->scale);
+    pglDisable(GL_SCISSOR_TEST);
+    pglDisable(GL_BLEND);
+    pglDisable(GL_DEPTH_TEST);
+    pglDisable(GL_STENCIL_TEST);
+    pglDisable(GL_CULL_FACE);
+    pglDisable(GL_COLOR_LOGIC_OP);
+    pglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    pglUseProgram(sCopyProgram);
+    pglBindVertexArray(sCopyVao);
+    pglActiveTexture(GL_TEXTURE0);
+    pglBindTexture(GL_TEXTURE_2D, s->tex);
+    pglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    pglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    pglUniform1i(pglGetUniformLocation(sCopyProgram, "uTex"), 0);
+    pglDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    pglBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+    pglViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    s->msaaStale = false;
+}
+
 void PcSurface_SyncToGl(PcSurface *s)
 {
     if (s == NULL || s->kind == PC_SURFACE_DEPTH)
@@ -513,9 +767,16 @@ void PcSurface_SyncToGl(PcSurface *s)
         PcFormat_DecodeTexture(s->mem, s->width, s->height, s->fmt, rgba);
     else
         PcFormat_DecodeColor(s->mem, s->width, s->height, s->fmt, rgba);
-    pglBindTexture(GL_TEXTURE_2D, s->tex);
-    pglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    pglTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    if (s->scale > 1)
+        UploadScaled(s, rgba);
+    else
+    {
+        pglBindTexture(GL_TEXTURE_2D, s->tex);
+        pglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        pglTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    }
+    if (s->samples > 1)
+        s->msaaStale = true;
     s->cpuNewer = false;
     if (!IsWatched(s->mem))
         s->hash = Hash(s->mem, s->bytes);
@@ -529,11 +790,19 @@ void PcSurface_SyncToMemory(PcSurface *s)
     u8 *rgba = Scratch((size_t)s->width * s->height * 4);
     if (rgba == NULL)
         return;
-    GLuint fbo = PcSurface_Framebuffer(s, s->depth);
-    pglBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    pglPixelStorei(GL_PACK_ALIGNMENT, 1);
-    pglReadPixels(0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    pglBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    PcSurface_Resolve(s);
+    if (s->scale > 1)
+        ReadScaled(s, rgba);
+    else
+    {
+        GLint read = 0;
+        pglGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+        GLuint fbo = PcSurface_Framebuffer(s, s->depth);
+        pglBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        pglPixelStorei(GL_PACK_ALIGNMENT, 1);
+        pglReadPixels(0, 0, s->width, s->height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        pglBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    }
     if (s->kind == PC_SURFACE_COLOR)
         PcFormat_EncodeColor(rgba, s->width, s->height, s->fmt, s->mem);
     else
@@ -553,6 +822,7 @@ void PcSurface_SyncToMemory(PcSurface *s)
 
 GLuint PcSurface_Framebuffer(PcSurface *color, PcSurface *depth)
 {
+    ApplyQuality(color, depth);
     if (color->fbo && color->depth == depth)
         return color->fbo;
     if (color->fbo)
@@ -567,14 +837,23 @@ GLuint PcSurface_Framebuffer(PcSurface *color, PcSurface *depth)
         {
             pglGenRenderbuffers(1, &depth->depthRb);
             pglBindRenderbuffer(GL_RENDERBUFFER, depth->depthRb);
-            pglRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, color->width, color->height);
+            pglRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, color->width * color->scale,
+                                   color->height * color->scale);
         }
         pglFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth->depthRb);
     }
     GLenum status = pglCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
         fprintf(stderr, "[VIDEO] framebuffer %ux%u incomplete: 0x%04X\n", color->width, color->height, status);
+    if (color->samples > 1)
+        MakeMsaa(color, depth);
     return color->fbo;
+}
+
+GLuint PcSurface_DrawFbo(PcSurface *color, PcSurface *depth)
+{
+    GLuint fbo = PcSurface_Framebuffer(color, depth);
+    return color->samples > 1 && color->msaaFbo ? color->msaaFbo : fbo;
 }
 
 /* Debug: every colour/texture surface as it is in GL, as PNG files
@@ -754,9 +1033,16 @@ static void ClearSurfaceGl(PcSurface *color, PcSurface *depth, bool clearColor, 
         if (target == NULL)
             return;
     }
-    GLuint fbo = PcSurface_Framebuffer(target, target->depth);
+    GLuint fbo = PcSurface_DrawFbo(target, target->depth);
     pglBindFramebuffer(GL_FRAMEBUFFER, fbo);
     pglDisable(GL_SCISSOR_TEST);
+    if (target->samples > 1 && target->msaaFbo)
+    {
+        /* Cleared in the multisampled buffer, the one drawn into. */
+        target->msaaDirty = true;
+        if (clearColor)
+            target->msaaStale = false; /* the whole picture is the clear's now */
+    }
     pglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     pglDepthMask(GL_TRUE);
     pglStencilMask(0xFF);
